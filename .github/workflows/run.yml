@@ -3,6 +3,10 @@
 
 name: arXiv-daily-ai-enhanced
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-production
+  cancel-in-progress: false
+
 on:
   schedule:
     - cron: "30 17 * * *"
@@ -242,9 +246,39 @@ jobs:
                 exit 1
                 ;;
         esac
+
+    - name: Subtract same-day already enhanced papers
+      id: same_day_step
+      if: steps.dedup_check.outputs.has_new_content == 'true'
+      run: |
+        set -euo pipefail
+        source .venv/bin/activate
+        today="${{ steps.crawl_step.outputs.crawl_date }}"
+        language="${{ vars.LANGUAGE }}"
+        history_dir="${{ steps.history_step.outputs.history_dir }}"
+        if [ -z "$history_dir" ]; then
+          history_dir="${RUNNER_TEMP}/daily_arxiv_history/unavailable"
+        fi
+
+        existing_today_ai="${history_dir}/${today}_AI_enhanced_${language}.jsonl"
+        new_candidates="data/${today}_new.jsonl"
+        python -m daily_arxiv.daily_arxiv.same_day_merge subtract \
+          --current "data/${today}.jsonl" \
+          --existing "$existing_today_ai" \
+          --output "$new_candidates"
+
+        new_count=$(python -c 'import sys; from pathlib import Path; print(sum(1 for line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines() if line.strip()))' "$new_candidates")
+        echo "new_candidate_count=$new_count" >> "$GITHUB_OUTPUT"
+        if [ "$new_count" -gt 0 ]; then
+          echo "has_new_candidates=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has_new_candidates=false" >> "$GITHUB_OUTPUT"
+          echo "skip_reason=same_day_no_new" >> "$GITHUB_OUTPUT"
+          echo "No new same-day candidates; existing same-day AI remains unchanged"
+        fi
         
     - name: AI Enhancement Processing
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_step.outputs.has_new_candidates == 'true'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -257,7 +291,7 @@ jobs:
         export MODEL_NAME="${{ vars.MODEL_NAME }}"
         export FILTER_KEYWORDS="${{ vars.FILTER_KEYWORDS }}"
         
-        python enhance.py --data ../data/${today}.jsonl
+        python enhance.py --data ../data/${today}_new.jsonl
         
         # 检查AI处理是否成功 / Check if AI processing was successful
         if [ $? -ne 0 ]; then
@@ -265,9 +299,34 @@ jobs:
             exit 1
         fi
         echo "AI增强处理完成 / AI enhancement processing completed"
+
+    - name: Merge same-day AI results
+      id: same_day_merge_step
+      if: steps.same_day_step.outputs.has_new_candidates == 'true'
+      run: |
+        set -euo pipefail
+        source .venv/bin/activate
+        today="${{ steps.crawl_step.outputs.crawl_date }}"
+        language="${{ vars.LANGUAGE }}"
+        history_dir="${{ steps.history_step.outputs.history_dir }}"
+        if [ -z "$history_dir" ]; then
+          history_dir="${RUNNER_TEMP}/daily_arxiv_history/unavailable"
+        fi
+
+        existing_today_ai="${history_dir}/${today}_AI_enhanced_${language}.jsonl"
+        staged_new_ai="data/${today}_new_AI_enhanced_${language}.jsonl"
+        final_today_ai="data/${today}_AI_enhanced_${language}.jsonl"
+        python -m daily_arxiv.daily_arxiv.same_day_merge merge \
+          --existing "$existing_today_ai" \
+          --new-ai "$staged_new_ai" \
+          --output "$final_today_ai"
+
+        # Staging files are not final data and must not be copied to data branch.
+        rm -f "data/${today}_new.jsonl" "$staged_new_ai"
+        echo "Same-day AI merge completed: $final_today_ai"
         
     - name: Convert to Markdown
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         source .venv/bin/activate
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -298,14 +357,14 @@ jobs:
         echo "Markdown转换完成 / Markdown conversion completed"
         
     - name: Update file list
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         echo "更新文件列表... / Updating file list..."
         ls data/*.jsonl | sed 's|data/||' > assets/file-list.txt
         echo "文件列表更新完成 / File list updated"
 
     - name: Generate password hash and inject into config
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         echo "🔐 Generating password hash for authentication..."
 
@@ -340,8 +399,10 @@ jobs:
 
     - name: Summary
       run: |
-        if [ "${{ steps.dedup_check.outputs.has_new_content }}" = "true" ]; then
+        if [ "${{ steps.same_day_step.outputs.has_new_candidates }}" = "true" ]; then
           echo "✅ 工作流完成：去重发现新内容并成功处理 / Workflow completed: Smart deduplication found new content and processed successfully"
+        elif [ "${{ steps.same_day_step.outputs.skip_reason }}" = "same_day_no_new" ]; then
+          echo "ℹ️ 工作流完成：同日无新论文，保留已有 AI 结果 / Workflow completed: No new same-day papers; existing AI results retained"
         else
           case "${{ steps.dedup_check.outputs.skip_reason }}" in
             "no_new_content")
@@ -360,7 +421,7 @@ jobs:
         fi
         
     - name: Inject repository info into data-config.js
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         echo "注入仓库信息到 data-config.js... / Injecting repository info into data-config.js..."
         
@@ -382,7 +443,7 @@ jobs:
         fi
 
     - name: Commit code changes to main branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         git config --global user.email "${{ vars.EMAIL }}"
         git config --global user.name "${{ vars.NAME }}"
@@ -404,7 +465,7 @@ jobs:
         fi
 
     - name: Push code changes to main branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
@@ -427,7 +488,7 @@ jobs:
         done
 
     - name: Prepare data files for data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         echo "准备数据文件... / Preparing data files..."
         today=${{ steps.crawl_step.outputs.crawl_date }}
@@ -443,7 +504,7 @@ jobs:
         echo "数据文件已保存到临时目录 / Data files saved to temporary directory"
 
     - name: Setup and commit to data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         git config --global user.email "${{ vars.EMAIL }}"
         git config --global user.name "${{ vars.NAME }}"
@@ -497,7 +558,7 @@ jobs:
         fi
 
     - name: Push data changes to data branch
-      if: steps.dedup_check.outputs.has_new_content == 'true'
+      if: steps.same_day_merge_step.outcome == 'success'
       run: |
         # 设置Git配置以处理自动合并 / Set Git config for automatic merging
         git config pull.rebase true
