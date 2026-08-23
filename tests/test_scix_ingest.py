@@ -104,6 +104,38 @@ def scix_document(
     return document
 
 
+def real_scix_shape_document():
+    return {
+        "bibcode": "2026arXiv260820135R",
+        "title": [
+            "Testing Statistical Isotropy in the FRB Sky Distribution: "
+            "A Selection-Function-Aware Framework"
+        ],
+        "abstract": "A representative FRB abstract for offline source normalization testing.",
+        "author": ["Ribeiro, Bruno W. N.", "Lemos, Thaiss"],
+        "doi": ["10.48550/arXiv.2608.20135"],
+        "identifier": [
+            "2026arXiv260820135R",
+            "arXiv:2608.20135",
+            "10.48550/arXiv.2608.20135",
+        ],
+        "year": "2026",
+        "pub": "arXiv e-prints",
+        "pubdate": "2026-08-00",
+        "entdate": None,
+        "database": ["astronomy"],
+        "doctype": "eprint",
+        "property": [
+            "ARTICLE",
+            "EPRINT_OPENACCESS",
+            "ESOURCE",
+            "NOT REFEREED",
+            "OPENACCESS",
+        ],
+        "esources": ["EPRINT_HTML", "EPRINT_PDF"],
+    }
+
+
 class ScixClientTests(unittest.TestCase):
     def test_query_is_broad_topical_candidate_retrieval(self):
         query = build_scix_query("2026-08-20", "2026-08-23")
@@ -266,6 +298,73 @@ class SourceMergeTests(unittest.TestCase):
         self.assertTrue(paper["abs"].startswith("https://arxiv.org/abs/"))
         self.assertEqual("10.1234/example.1", paper["doi"])
         self.assertEqual("10.1234/example.1", paper["links"]["doi"])
+
+    def test_real_scix_response_shape_normalizes_without_url_inference(self):
+        paper = normalize_scix_document(real_scix_shape_document())
+
+        self.assertEqual("2608.20135", paper["id"])
+        self.assertEqual(
+            "Testing Statistical Isotropy in the FRB Sky Distribution: "
+            "A Selection-Function-Aware Framework",
+            paper["title"],
+        )
+        self.assertEqual(
+            "A representative FRB abstract for offline source normalization testing.",
+            paper["summary"],
+        )
+        self.assertEqual(
+            ["Ribeiro, Bruno W. N.", "Lemos, Thaiss"], paper["authors"]
+        )
+        self.assertEqual(["scix"], paper["categories"])
+        self.assertEqual("scix", paper["source"])
+        self.assertEqual("2026arXiv260820135R", paper["bibcode"])
+        self.assertEqual("10.48550/arxiv.2608.20135", paper["doi"])
+        self.assertEqual("arXiv e-prints", paper["journal"])
+        self.assertEqual("2026-08-00", paper["published"])
+        self.assertEqual(
+            real_scix_shape_document()["identifier"], paper["identifiers"]
+        )
+        self.assertEqual(real_scix_shape_document()["property"], paper["property"])
+        self.assertEqual(["EPRINT_HTML", "EPRINT_PDF"], paper["esources"])
+        self.assertEqual("https://arxiv.org/abs/2608.20135", paper["abs"])
+        self.assertEqual("https://arxiv.org/pdf/2608.20135", paper["pdf"])
+        self.assertNotIn("publisher", paper["links"])
+        self.assertTrue(
+            any(key.startswith("title-author-year:") for key in history_keys(paper))
+        )
+
+    def test_real_scix_shape_merges_once_with_arxiv_priority(self):
+        arxiv = arxiv_record(
+            paper_id="2608.20135v1",
+            title=(
+                "Testing Statistical Isotropy in the FRB Sky Distribution: "
+                "A Selection-Function-Aware Framework"
+            ),
+            summary="arXiv abstract",
+            authors=["Ribeiro, Bruno W. N."],
+            categories=["astro-ph.HE"],
+        )
+        result = merge_sources([arxiv], [real_scix_shape_document()])
+
+        self.assertEqual(1, len(result.records))
+        self.assertEqual(1, len(result.ai_records))
+        paper = result.records[0]
+        self.assertEqual("2608.20135", paper["id"])
+        self.assertEqual("arxiv+scix", paper["source"])
+        self.assertEqual(arxiv["title"], paper["title"])
+        self.assertEqual("arXiv abstract", paper["summary"])
+        self.assertEqual(arxiv["authors"], paper["authors"])
+        self.assertEqual(arxiv["categories"], paper["categories"])
+        self.assertEqual(arxiv["abs"], paper["abs"])
+        self.assertEqual(arxiv["pdf"], paper["pdf"])
+        self.assertEqual("2026arXiv260820135R", paper["bibcode"])
+        self.assertEqual("10.48550/arxiv.2608.20135", paper["doi"])
+        self.assertEqual("arXiv e-prints", paper["journal"])
+        self.assertEqual("2026-08-00", paper["published"])
+        self.assertEqual(real_scix_shape_document()["property"], paper["property"])
+        self.assertEqual(["EPRINT_HTML", "EPRINT_PDF"], paper["esources"])
+        self.assertIn("arxiv:2608.20135", history_keys(paper))
+        self.assertIn("doi:10.48550/arxiv.2608.20135", history_keys(paper))
 
     def test_esources_are_availability_metadata_not_urls(self):
         paper = normalize_scix_document(

@@ -273,6 +273,7 @@ def normalize_scix_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "journal": _first_text(document.get("pub")),
         "published": _first_text(document.get("pubdate")),
         "identifiers": identifiers,
+        "property": _string_list(document.get("property")),
         "esources": _string_list(document.get("esources")),
         "links": links,
     }
@@ -349,6 +350,11 @@ def _merge_two(left: Mapping[str, Any], right: Mapping[str, Any]) -> dict[str, A
         if identifier not in identifiers:
             identifiers.append(identifier)
     result["identifiers"] = identifiers
+    properties = _string_list(result.get("property"))
+    for property_name in _string_list(metadata_source.get("property")):
+        if property_name not in properties:
+            properties.append(property_name)
+    result["property"] = properties
     esources = _string_list(result.get("esources"))
     for esource in _string_list(metadata_source.get("esources")):
         if esource not in esources:
