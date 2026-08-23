@@ -3,7 +3,7 @@ import json
 import sys
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict
+from typing import List, Dict, Optional, Tuple
 from queue import Queue
 from threading import Lock
 # INSERT_YOUR_CODE
@@ -34,30 +34,52 @@ def parse_args():
     parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of parallel workers")
     return parser.parse_args()
 
-def process_single_item(chain, item: Dict, language: str) -> Dict:
-    def is_sensitive(content: str) -> bool:
-        """
-        调用 spam.dw-dengwei.workers.dev 接口检测内容是否包含敏感词。
-        返回 True 表示触发敏感词，False 表示未触发。
-        """
-        try:
-            resp = requests.post(
-                "https://spam.dw-dengwei.workers.dev",
-                json={"text": content},
-                timeout=5
-            )
-            if resp.status_code == 200:
-                result = resp.json()
-                # 约定接口返回 {"sensitive": true/false, ...}
-                return result.get("sensitive", True)
-            else:
-                # 如果接口异常，默认不触发敏感词
-                print(f"Sensitive check failed with status {resp.status_code}", file=sys.stderr)
-                return True
-        except Exception as e:
-            print(f"Sensitive check error: {e}", file=sys.stderr)
-            return True
+def parse_filter_keywords(raw_keywords: Optional[str]) -> List[str]:
+    """Parse comma-separated keywords and remove empty/case-insensitive duplicates."""
+    if not raw_keywords:
+        return []
 
+    keywords = []
+    seen = set()
+    for raw_keyword in raw_keywords.split(","):
+        keyword = raw_keyword.strip()
+        normalized_keyword = keyword.casefold()
+        if keyword and normalized_keyword not in seen:
+            keywords.append(keyword)
+            seen.add(normalized_keyword)
+    return keywords
+
+def filter_papers_by_keywords(
+    papers: List[Dict],
+    keywords: List[str],
+) -> Tuple[List[Dict], Dict[str, int]]:
+    """Filter papers by OR-matching keywords in title and abstract."""
+    keyword_hit_counts = {keyword: 0 for keyword in keywords}
+    if not keywords:
+        return list(papers), keyword_hit_counts
+
+    normalized_keywords = [
+        (keyword, keyword.casefold()) for keyword in keywords
+    ]
+    filtered_papers = []
+
+    for paper in papers:
+        title = str(paper.get("title") or "")
+        summary = str(paper.get("summary") or "")
+        searchable_text = f"{title} {summary}".casefold()
+        matched = False
+
+        for keyword, normalized_keyword in normalized_keywords:
+            if normalized_keyword in searchable_text:
+                keyword_hit_counts[keyword] += 1
+                matched = True
+
+        if matched:
+            filtered_papers.append(paper)
+
+    return filtered_papers, keyword_hit_counts
+
+def process_single_item(chain, item: Dict, language: str) -> Dict:
     def check_github_code(content: str) -> Dict:
         """提取并验证 GitHub 链接"""
         code_info = {}
@@ -104,10 +126,6 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
             # github.io 不进行 star 和 update 判断
                 
         return code_info
-
-    # 检查 summary 字段
-    if is_sensitive(item.get("summary", "")):
-        return None
 
     # 检测代码可用性
     code_info = check_github_code(item.get("summary", ""))
@@ -159,10 +177,6 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
         if field not in item['AI']:
             item['AI'][field] = default_ai_fields[field]
 
-    # 检查 AI 生成的所有字段
-    for v in item.get("AI", {}).values():
-        if is_sensitive(str(v)):
-            return None
     return item
 
 def process_all_items(data: List[Dict], model_name: str, language: str, max_workers: int) -> List[Dict]:
@@ -227,9 +241,15 @@ def main():
 
     # 读取数据
     data = []
-    with open(args.data, "r") as f:
+    with open(args.data, "r", encoding="utf-8") as f:
         for line in f:
             data.append(json.loads(line))
+
+    print(
+        f"去重后输入论文数量: {len(data)} / "
+        f"Papers after deduplication: {len(data)}",
+        file=sys.stderr,
+    )
 
     # 去重
     seen_ids = set()
@@ -241,17 +261,54 @@ def main():
 
     data = unique_data
     print('Open:', args.data, file=sys.stderr)
-    
+
+    keywords = parse_filter_keywords(os.environ.get("FILTER_KEYWORDS"))
+    filtered_data, keyword_hit_counts = filter_papers_by_keywords(data, keywords)
+
+    print(
+        f"配置的有效关键词数量: {len(keywords)} / "
+        f"Valid keyword count: {len(keywords)}",
+        file=sys.stderr,
+    )
+    print(
+        f"筛选后唯一论文数量: {len(filtered_data)} / "
+        f"Unique papers after keyword filtering: {len(filtered_data)}",
+        file=sys.stderr,
+    )
+    if keywords:
+        for keyword in keywords:
+            print(
+                f"关键词命中数量 [{keyword}]: {keyword_hit_counts[keyword]} / "
+                f"Hits for keyword [{keyword}]: {keyword_hit_counts[keyword]}",
+                file=sys.stderr,
+            )
+    else:
+        print(
+            "未配置有效关键词，全部论文放行 / "
+            "No valid keywords configured; all papers passed",
+            file=sys.stderr,
+        )
+
+    if not filtered_data:
+        with open(target_file, "w", encoding="utf-8"):
+            pass
+        print(
+            f"没有论文命中关键词，已生成空结果文件: {target_file} / "
+            f"No papers matched; created empty result file: {target_file}",
+            file=sys.stderr,
+        )
+        return
+
     # 并行处理所有数据
     processed_data = process_all_items(
-        data,
+        filtered_data,
         model_name,
         language,
         args.max_workers
     )
     
     # 保存结果
-    with open(target_file, "w") as f:
+    with open(target_file, "w", encoding="utf-8") as f:
         for item in processed_data:
             if item is not None:
                 f.write(json.dumps(item) + "\n")

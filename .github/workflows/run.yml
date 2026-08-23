@@ -54,6 +54,9 @@ jobs:
             echo "爬取失败，未生成数据文件 / Crawling failed, no data file generated"
             exit 1
         fi
+
+        # 在去重前保存完整原始抓取结果 / Preserve the complete crawl before deduplication
+        cp "../data/${today}.jsonl" "../data/${today}_raw.jsonl"
         
         echo "crawl_date=$today" >> $GITHUB_OUTPUT
         echo "爬取完成 / Crawling completed"
@@ -109,6 +112,7 @@ jobs:
         export OPENAI_BASE_URL=${{ secrets.OPENAI_BASE_URL }}
         export LANGUAGE="${{ vars.LANGUAGE }}"
         export MODEL_NAME="${{ vars.MODEL_NAME }}"
+        export FILTER_KEYWORDS="${{ vars.FILTER_KEYWORDS }}"
         
         python enhance.py --data ../data/${today}.jsonl
         
