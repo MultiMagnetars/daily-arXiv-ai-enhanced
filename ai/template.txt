@@ -1,4 +1,11 @@
-Please analyze the following abstract of papers. 
+Analyze the following arXiv paper title and abstract for a researcher in observational radio astronomy.
 
-Content:
+The supplied title and abstract are the only paper content available. Follow the system instructions for title-and-abstract-only evidence, missing information, exact numbers, units, technical terms, and the five required fields.
+
+Produce concise, information-dense content in the requested language. Do not use external knowledge, do not invent details, and do not add fields.
+
+Title:
+{title}
+
+Abstract:
 {content}

@@ -145,7 +145,8 @@ def process_single_item(chain, item: Dict, language: str) -> Dict:
     try:
         response: Structure = chain.invoke({
             "language": language,
-            "content": item['summary']
+            "title": item.get("title") or "",
+            "content": item.get("summary") or ""
         })
         item['AI'] = response.model_dump()
     except langchain_core.exceptions.OutputParserException as e:
