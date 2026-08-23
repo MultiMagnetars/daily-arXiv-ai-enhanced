@@ -47,7 +47,7 @@ SCIX_FIELDS: tuple[str, ...] = (
     "esources",
 )
 
-TOPICAL_TERMS: tuple[str, ...] = (
+DEFAULT_TOPICAL_TERMS: tuple[str, ...] = (
     "pulsar",
     "magnetar",
     "neutron star",
@@ -55,6 +55,27 @@ TOPICAL_TERMS: tuple[str, ...] = (
     "FRB",
     "radio transient",
 )
+
+# Backward-compatible alias for callers that imported the old constant.
+TOPICAL_TERMS = DEFAULT_TOPICAL_TERMS
+
+
+def parse_topical_terms(raw_terms: str | None) -> tuple[str, ...]:
+    """Parse comma-separated SciX topical terms with a safe default."""
+
+    if not raw_terms or not raw_terms.strip():
+        return DEFAULT_TOPICAL_TERMS
+
+    terms: list[str] = []
+    seen: set[str] = set()
+    for raw_term in raw_terms.split(","):
+        term = raw_term.strip()
+        normalized = term.casefold()
+        if term and normalized not in seen:
+            terms.append(term)
+            seen.add(normalized)
+
+    return tuple(terms) if terms else DEFAULT_TOPICAL_TERMS
 
 
 @dataclass
@@ -79,7 +100,11 @@ class ScixFetchResult:
         }
 
 
-def build_scix_query(start_date: str, end_date: str) -> str:
+def build_scix_query(
+    start_date: str,
+    end_date: str,
+    topical_terms: Sequence[str] | None = None,
+) -> str:
     """Build a broad topical candidate query.
 
     The topical clause intentionally stays smaller than FILTER_KEYWORDS.  It
@@ -87,9 +112,10 @@ def build_scix_query(start_date: str, end_date: str) -> str:
     final business rule.
     """
 
+    effective_terms = tuple(topical_terms) if topical_terms else DEFAULT_TOPICAL_TERMS
     topical_clause = " OR ".join(
         f'abs:"{term}"' if " " in term else f"abs:{term}"
-        for term in TOPICAL_TERMS
+        for term in effective_terms
     )
     return (
         "database:astronomy "
@@ -120,6 +146,7 @@ class ScixClient:
         timeout: float = DEFAULT_TIMEOUT,
         retries: int = DEFAULT_RETRIES,
         sleep_fn: Callable[[float], None] = time.sleep,
+        topical_terms: Sequence[str] | None = None,
     ) -> None:
         if rows <= 0:
             raise ValueError("rows must be positive")
@@ -135,6 +162,9 @@ class ScixClient:
         self.timeout = timeout
         self.retries = retries
         self.sleep_fn = sleep_fn
+        self.topical_terms = (
+            tuple(topical_terms) if topical_terms else DEFAULT_TOPICAL_TERMS
+        )
 
         if session is not None:
             self.session = session
@@ -162,7 +192,11 @@ class ScixClient:
                 error="requests is not available",
             )
 
-        query = build_scix_query(start_date, end_date)
+        query = build_scix_query(
+            start_date,
+            end_date,
+            topical_terms=self.topical_terms,
+        )
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Accept": "application/json",
@@ -354,10 +388,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     args = parser.parse_args(argv)
 
+    topical_terms = parse_topical_terms(os.environ.get("SCIX_TOPICAL_TERMS"))
+    print(
+        f"SciX topical terms ({len(topical_terms)}): "
+        + " | ".join(topical_terms),
+        file=sys.stderr,
+    )
+
     client = ScixClient(
         rows=args.rows,
         max_pages=args.max_pages,
         timeout=args.timeout,
+        topical_terms=topical_terms,
     )
     result = client.fetch(args.start_date, args.end_date)
     write_raw_jsonl(result.docs, args.output)

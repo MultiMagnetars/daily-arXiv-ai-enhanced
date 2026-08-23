@@ -8,8 +8,10 @@ from pathlib import Path
 from daily_arxiv.daily_arxiv.check_stats import perform_deduplication, resolve_run_date
 from daily_arxiv.daily_arxiv.scix_client import (
     SCIX_API_URL,
+    DEFAULT_TOPICAL_TERMS,
     ScixClient,
     build_scix_query,
+    parse_topical_terms,
 )
 from daily_arxiv.daily_arxiv.source_merge import (
     history_keys,
@@ -137,6 +139,43 @@ def real_scix_shape_document():
 
 
 class ScixClientTests(unittest.TestCase):
+    def test_topical_terms_default_for_missing_or_empty_values(self):
+        self.assertEqual(DEFAULT_TOPICAL_TERMS, parse_topical_terms(None))
+        self.assertEqual(DEFAULT_TOPICAL_TERMS, parse_topical_terms(""))
+        self.assertEqual(DEFAULT_TOPICAL_TERMS, parse_topical_terms(" ,  , "))
+
+    def test_topical_terms_strip_ignore_empty_and_dedupe_case_insensitively(self):
+        self.assertEqual(
+            ("pulsar", "magnetar"),
+            parse_topical_terms(" pulsar, , magnetar, "),
+        )
+        self.assertEqual(("pulsar",), parse_topical_terms("pulsar,PULSAR,pulsar"))
+
+    def test_custom_topical_terms_are_quoted_and_or_joined(self):
+        query = build_scix_query(
+            "2026-08-20",
+            "2026-08-23",
+            topical_terms=parse_topical_terms(
+                "neutron star, fast radio burst, single pulse"
+            ),
+        )
+        self.assertIn(
+            'abs:"neutron star" OR abs:"fast radio burst" OR abs:"single pulse"',
+            query,
+        )
+        self.assertNotIn("AND abs:", query)
+
+    def test_client_uses_explicit_topical_terms_for_request_query(self):
+        session = FakeSession([response_with_docs([])])
+        client = ScixClient(
+            token="token",
+            session=session,
+            topical_terms=("pulsar", "radio transient"),
+        )
+        client.fetch("2026-08-23", "2026-08-23")
+        query = session.calls[0][1]["params"]["q"]
+        self.assertIn("abs:pulsar OR abs:\"radio transient\"", query)
+
     def test_query_is_broad_topical_candidate_retrieval(self):
         query = build_scix_query("2026-08-20", "2026-08-23")
         self.assertIn("database:astronomy", query)

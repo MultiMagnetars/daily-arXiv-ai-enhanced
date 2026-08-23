@@ -266,6 +266,8 @@ class ScixSmokeTests(unittest.TestCase):
         self.assertIn("- scix-smoke", workflow)
         self.assertIn("- scix-e2e", workflow)
         self.assertIn("SCIX_API_TOKEN: ${{ secrets.SCIX_API_TOKEN }}", workflow)
+        self.assertIn("SCIX_TOPICAL_TERMS: ${{ vars.SCIX_TOPICAL_TERMS }}", workflow)
+        self.assertIn('FILTER_KEYWORDS: ${{ vars.FILTER_KEYWORDS }}', workflow)
         smoke_block = workflow.split("  scix-smoke:", 1)[1].split("\n  scix-e2e:", 1)[0]
         self.assertIn("python -m daily_arxiv.daily_arxiv.scix_smoke", smoke_block)
         self.assertNotIn("source_merge.py", smoke_block)

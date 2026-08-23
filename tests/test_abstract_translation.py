@@ -287,6 +287,13 @@ if (!html.includes('<details open><summary>中文直译')) throw new Error('Chin
 if (!html.includes('<summary>English original</summary>')) throw new Error('English original is missing');
 if (html.includes('<script>alert(1)</script>') || html.includes('<img src=x')) throw new Error('translation HTML was not escaped');
 if (!html.includes('&lt;script&gt;')) throw new Error('escaped translation is missing');
+const maliciousTitlePaper = Object.assign({}, paper, {
+  title: '<script>alert(1)</script> J1637$-$4642'
+});
+context.showPaperDetails(maliciousTitlePaper, 1);
+const maliciousTitleHtml = element('modalTitle').innerHTML;
+if (maliciousTitleHtml.includes('<script>alert(1)</script>')) throw new Error('title XSS was not escaped');
+if (!maliciousTitleHtml.includes('&lt;script&gt;')) throw new Error('escaped title is missing');
 for (const sample of [
   '$10^{-6}$',
   '$\\Delta\\nu/\\nu$',
@@ -349,6 +356,7 @@ for (const value of invalidValues) {
   }
 }
 
+const modalTitle = element('modalTitle');
 const modalBody = element('modalBody');
 const typesetTargets = [];
 const clearTargets = [];
@@ -361,11 +369,11 @@ context.window.MathJax = {
 };
 context.showPaperDetails(oldPaper, 1);
 context.showPaperDetails(paper, 1);
-if (typesetTargets.length !== 2 || typesetTargets.some(target => target !== modalBody)) {
-  throw new Error('MathJax was not scoped to modalBody for each modal render');
+if (typesetTargets.length !== 4 || typesetTargets.some((target, index) => target !== (index % 2 === 0 ? modalTitle : modalBody))) {
+  throw new Error('MathJax was not scoped to modalTitle and modalBody for each modal render');
 }
-if (clearTargets.length !== 2 || clearTargets.some(target => target !== modalBody)) {
-  throw new Error('MathJax typesetClear was not scoped to modalBody');
+if (clearTargets.length !== 4 || clearTargets.some((target, index) => target !== (index % 2 === 0 ? modalTitle : modalBody))) {
+  throw new Error('MathJax typesetClear was not scoped to modalTitle and modalBody');
 }
 
 let warningCount = 0;
@@ -382,7 +390,7 @@ context.window.MathJax = {
 context.showPaperDetails(oldPaper, 1);
 
 setTimeout(() => {
-  if (warningCount !== 1) throw new Error('MathJax rejection was not handled with one warning');
+  if (warningCount !== 2) throw new Error('MathJax rejection was not handled with one warning per scoped container');
   context.console.warn = originalWarn;
   context.window.MathJax = undefined;
   context.showPaperDetails(paper, 1);
