@@ -1508,6 +1508,7 @@ function showPaperDetails(paper, paperIndex) {
   );
   
   // 在标题前添加索引号
+  clearMath(modalTitle);
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${highlightedTitle}` : highlightedTitle;
   
   const abstractText = typeof paper.details === 'string' ? paper.details : '';
@@ -1640,6 +1641,7 @@ function showPaperDetails(paper, paperIndex) {
   // Update modal content and typeset only the current modal body.
   clearMath(modalBody);
   modalBody.innerHTML = modalContent;
+  void typesetMath(modalTitle);
   void typesetMath(modalBody);
   document.getElementById('paperLink').href = paper.url;
   document.getElementById('pdfLink').href = paper.url.replace('abs', 'pdf');
