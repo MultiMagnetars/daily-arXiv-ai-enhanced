@@ -274,6 +274,20 @@ class ScixSmokeTests(unittest.TestCase):
         self.assertIn('output-dir "${RUNNER_TEMP}/scix_e2e_output"', e2e_block)
         self.assertNotIn("git push", e2e_block)
 
+    def test_production_scix_calls_are_root_invocable_modules(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "python -m daily_arxiv.daily_arxiv.scix_client \\",
+            workflow,
+        )
+        self.assertIn(
+            "python -m daily_arxiv.daily_arxiv.source_merge \\",
+            workflow,
+        )
+        self.assertNotIn("python daily_arxiv/scix_client.py", workflow)
+        self.assertNotIn("python daily_arxiv/source_merge.py", workflow)
+
     def test_status_classifier_never_exposes_client_auth_header(self):
         result = ScixFetchResult(status="ok", docs=[])
         self.assertEqual("PASS_API_CONNECTION", classify_client_result(result))

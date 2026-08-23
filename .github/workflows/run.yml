@@ -151,7 +151,7 @@ jobs:
           echo "SciX disabled: SCIX_API_TOKEN not set"
           echo "scix_status=unavailable" >> "$GITHUB_OUTPUT"
         else
-          python daily_arxiv/scix_client.py \
+          python -m daily_arxiv.daily_arxiv.scix_client \
             --start-date "$start_date" \
             --end-date "$today" \
             --output "$scix_raw" \
@@ -161,7 +161,7 @@ jobs:
           echo "scix_status=$scix_status_value" >> "$GITHUB_OUTPUT"
         fi
 
-        python daily_arxiv/source_merge.py \
+        python -m daily_arxiv.daily_arxiv.source_merge \
           --arxiv "data/${today}_raw.jsonl" \
           --scix "$scix_raw" \
           --output "data/${today}.jsonl" \
