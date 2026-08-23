@@ -29,7 +29,11 @@ SMOKE_RETRIES = 0
 SMOKE_LOOKBACK_DAYS = 3
 ABSTRACT_PREVIEW_LIMIT = 240
 
-PASS_STATUSES = {"PASS_API_CONNECTION", "PASS_EMPTY"}
+PASS_STATUSES = {
+    "PASS_API_CONNECTION",
+    "PASS_API_CONNECTION_LIMITED",
+    "PASS_EMPTY",
+}
 INSPECTED_FIELDS: tuple[str, ...] = (
     "bibcode",
     "title",
@@ -119,11 +123,16 @@ def classify_client_result(result: Any) -> str:
     client_status = getattr(result, "status", "")
     docs = getattr(result, "docs", []) or []
     error = str(getattr(result, "error", "") or "")
+    first_doc_is_mapping = bool(docs) and isinstance(docs[0], Mapping)
 
     if client_status == "ok":
         # The request asks for one row.  Treat a server response with more
         # than one document as a response-shape violation for this smoke test.
-        return "PASS_API_CONNECTION" if len(docs) <= 1 else "FAIL_RESPONSE_SHAPE"
+        return (
+            "PASS_API_CONNECTION"
+            if len(docs) <= 1 and (not docs or first_doc_is_mapping)
+            else "FAIL_RESPONSE_SHAPE"
+        )
     if client_status == "success_empty":
         return "PASS_EMPTY"
     if client_status == "auth_error":
@@ -135,6 +144,13 @@ def classify_client_result(result: Any) -> str:
             return "FAIL_RESPONSE_SHAPE"
         return "FAIL_NETWORK"
     if client_status == "truncated":
+        if (
+            len(docs) == SMOKE_ROWS
+            and first_doc_is_mapping
+            and SMOKE_ROWS == 1
+            and SMOKE_MAX_PAGES == 1
+        ):
+            return "PASS_API_CONNECTION_LIMITED"
         return "FAIL_RESPONSE_SHAPE"
     return "FAIL_RESPONSE_SHAPE"
 
@@ -166,6 +182,8 @@ def render_report(
         f"query_end_utc: {end_date}",
         f"query: {_redact(build_scix_query(start_date, end_date), secret)}",
     ]
+    if status == "PASS_API_CONNECTION_LIMITED":
+        lines.append("limited_sample: true")
     if error:
         lines.append(f"error: {error}")
 

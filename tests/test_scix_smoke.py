@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from daily_arxiv.daily_arxiv.scix_client import ScixFetchResult
 from daily_arxiv.daily_arxiv.scix_smoke import (
@@ -10,6 +11,7 @@ from daily_arxiv.daily_arxiv.scix_smoke import (
     SMOKE_RETRIES,
     SMOKE_ROWS,
     classify_client_result,
+    main as smoke_main,
     run_smoke,
 )
 
@@ -61,23 +63,92 @@ class ScixSmokeTests(unittest.TestCase):
         )
         self.assertEqual([("2026-08-20", "2026-08-23")], holder["client"].calls)
 
+    def test_truncated_bounded_sample_is_limited_connection_pass_and_exit_zero(self):
+        result = ScixFetchResult(
+            docs=[{"bibcode": "2026arXiv260820135R"}],
+            status="truncated",
+            num_found=10,
+            pages=1,
+            truncated=True,
+        )
+        smoke = run_smoke(
+            client_factory=factory_for(result, {}),
+            run_date=date(2026, 8, 23),
+            token="secret-token",
+        )
+
+        self.assertEqual("PASS_API_CONNECTION_LIMITED", smoke.status)
+        self.assertIn("client_status: truncated", smoke.report)
+        self.assertIn("limited_sample: true", smoke.report)
+        self.assertIn("numFound: 10", smoke.report)
+        self.assertIn("docs_received: 1", smoke.report)
+        with patch(
+            "daily_arxiv.daily_arxiv.scix_smoke.run_smoke", return_value=smoke
+        ), patch("sys.stdout"):
+            self.assertEqual(0, smoke_main())
+
+    def test_truncated_without_a_document_remains_response_shape_failure(self):
+        result = ScixFetchResult(
+            docs=[],
+            status="truncated",
+            num_found=10,
+            pages=1,
+            truncated=True,
+        )
+        smoke = run_smoke(
+            client_factory=factory_for(result, {}),
+            run_date=date(2026, 8, 23),
+            token="token",
+        )
+        self.assertEqual("FAIL_RESPONSE_SHAPE", smoke.status)
+        self.assertNotIn("limited_sample: true", smoke.report)
+
+    def test_truncated_with_more_than_one_document_remains_response_shape_failure(self):
+        result = ScixFetchResult(
+            docs=[{"bibcode": "one"}, {"bibcode": "two"}],
+            status="truncated",
+            num_found=10,
+            pages=1,
+            truncated=True,
+        )
+        smoke = run_smoke(
+            client_factory=factory_for(result, {}),
+            run_date=date(2026, 8, 23),
+            token="token",
+        )
+        self.assertEqual("FAIL_RESPONSE_SHAPE", smoke.status)
+        self.assertNotIn("limited_sample: true", smoke.report)
+
     def test_sanitized_output_has_types_and_bounded_abstract(self):
         secret = "secret-token"
         doc = {
-            "bibcode": "2026ApJ...001A",
-            "title": ["Single-pulse variability"],
-            "abstract": ["abstract " + ("x" * 500) + " " + secret],
+            "bibcode": "2026arXiv260820135R",
+            "title": [
+                "Testing Statistical Isotropy in the FRB Sky Distribution: "
+                "A Selection-Function-Aware Framework"
+            ],
+            "abstract": "abstract " + ("x" * 500) + " " + secret,
             "author": ["A. Author"],
-            "doi": ["https://doi.org/10.1234/Example.1"],
-            "identifier": ["arXiv:2608.12345v2"],
-            "year": 2026,
-            "pub": "The Astrophysical Journal",
+            "doi": ["10.48550/arXiv.2608.20135"],
+            "identifier": [
+                "2026arXiv260820135R",
+                "arXiv:2608.20135",
+                "10.48550/arXiv.2608.20135",
+            ],
+            "year": "2026",
+            "pub": "arXiv",
             "pubdate": "2026-08-23",
-            "entdate": "2026-08-23",
+            "entdate": None,
             "database": ["astronomy"],
-            "doctype": ["article"],
-            "property": ["ARTICLE"],
-            "esources": ["PUB_HTML", "EPRINT_PDF"],
+            "doctype": "eprint",
+            "property": [
+                "ARTICLE",
+                "EPRINT_OPENACCESS",
+                "ESOURCE",
+                "NOT REFEREED",
+                "OPENACCESS",
+            ],
+            "esources": ["EPRINT_HTML", "EPRINT_PDF"],
         }
         holder = {}
         result = ScixFetchResult(docs=[doc], status="ok", num_found=1, pages=1)
@@ -95,14 +166,19 @@ class ScixSmokeTests(unittest.TestCase):
         self.assertIn("doi_type: list", report)
         self.assertIn("identifier_type: list", report)
         self.assertIn("esources_type: list", report)
-        self.assertIn("abstract_type: list", report)
+        self.assertIn("abstract_type: str", report)
+        self.assertIn("year_type: str", report)
+        self.assertIn("pub_type: str", report)
+        self.assertIn("pubdate_type: str", report)
+        self.assertIn("entdate_type: NoneType", report)
+        self.assertIn("doctype_type: str", report)
         self.assertIn("abstract_present: true", report)
         self.assertIn("abstract_length:", report)
         self.assertIn("abstract_preview:", report)
-        self.assertIn('normalized_doi: "10.1234/example.1"', report)
-        self.assertIn('normalized_arxiv_id: "2608.12345"', report)
-        self.assertIn("https://arxiv.org/abs/2608.12345", report)
-        self.assertIn("https://arxiv.org/pdf/2608.12345", report)
+        self.assertIn('normalized_doi: "10.48550/arxiv.2608.20135"', report)
+        self.assertIn('normalized_arxiv_id: "2608.20135"', report)
+        self.assertIn("https://arxiv.org/abs/2608.20135", report)
+        self.assertIn("https://arxiv.org/pdf/2608.20135", report)
 
     def test_success_empty_is_a_pass_without_record_output(self):
         result = ScixFetchResult(status="success_empty", num_found=0, pages=1)
