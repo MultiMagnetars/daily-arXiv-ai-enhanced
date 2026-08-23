@@ -60,17 +60,89 @@ jobs:
         
         echo "crawl_date=$today" >> $GITHUB_OUTPUT
         echo "爬取完成 / Crawling completed"
+
+    - name: Fetch and merge SciX candidates
+      id: scix_merge_step
+      env:
+        SCIX_API_TOKEN: ${{ secrets.SCIX_API_TOKEN }}
+      run: |
+        set -euo pipefail
+        source .venv/bin/activate
+        today="${{ steps.crawl_step.outputs.crawl_date }}"
+        start_date=$(date -u -d "${today} - 3 days" "+%Y-%m-%d")
+        scix_raw="data/${today}_scix_raw.jsonl"
+        scix_status="data/${today}_scix_status.json"
+
+        # An empty raw file means SciX is disabled/unavailable; it never
+        # replaces the complete arXiv raw file.
+        : > "$scix_raw"
+        if [ -z "${SCIX_API_TOKEN:-}" ]; then
+          echo "SciX disabled: SCIX_API_TOKEN not set"
+          echo "scix_status=unavailable" >> "$GITHUB_OUTPUT"
+        else
+          python daily_arxiv/scix_client.py \
+            --start-date "$start_date" \
+            --end-date "$today" \
+            --output "$scix_raw" \
+            --status-file "$scix_status"
+          scix_status_value=$(python -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["status"])' "$scix_status")
+          echo "SciX status: $scix_status_value"
+          echo "scix_status=$scix_status_value" >> "$GITHUB_OUTPUT"
+        fi
+
+        python daily_arxiv/source_merge.py \
+          --arxiv "data/${today}_raw.jsonl" \
+          --scix "$scix_raw" \
+          --output "data/${today}.jsonl" \
+          --stats-file "data/${today}_merge_stats.json"
+        echo "SciX normalization and cross-source merge completed"
+
+    - name: Restore data branch history for deduplication
+      id: history_step
+      run: |
+        set -euo pipefail
+        today="${{ steps.crawl_step.outputs.crawl_date }}"
+        history_root="${RUNNER_TEMP}/daily_arxiv_history/${today}"
+        rm -rf "$history_root"
+        mkdir -p "$history_root"
+        echo "history_available=false" >> "$GITHUB_OUTPUT"
+
+        if ! git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+          echo "WARN: origin/data is unavailable; history deduplication will continue without branch history"
+          echo "history_status=unavailable" >> "$GITHUB_OUTPUT"
+        elif ! git fetch --no-tags origin data; then
+          echo "WARN: failed to fetch origin/data; history deduplication will continue without branch history"
+          echo "history_status=fetch_failed" >> "$GITHUB_OUTPUT"
+        elif git archive --format=tar FETCH_HEAD data | tar -x -C "$history_root"; then
+          echo "history_available=true" >> "$GITHUB_OUTPUT"
+          echo "history_status=ok" >> "$GITHUB_OUTPUT"
+          echo "history_dir=${history_root}/data" >> "$GITHUB_OUTPUT"
+          echo "Restored data branch history outside the main worktree"
+        else
+          echo "WARN: failed to extract origin/data history; history deduplication will continue without branch history"
+          echo "history_status=extract_failed" >> "$GITHUB_OUTPUT"
+        fi
         
     - name: Check for duplicates
       id: dedup_check
       run: |
         source .venv/bin/activate
+        today=${{ steps.crawl_step.outputs.crawl_date }}
         echo "执行去重检查... / Performing intelligent deduplication check..."
         
         cd daily_arxiv
         # 执行去重检查脚本 / Execute intelligent deduplication check script
         set +e  # 暂时允许命令失败 / Temporarily allow command failure
-        python daily_arxiv/check_stats.py
+        if [ "${{ steps.history_step.outputs.history_available }}" = "true" ]; then
+            python daily_arxiv/check_stats.py \
+              --date "$today" \
+              --history-dir "${{ steps.history_step.outputs.history_dir }}"
+        else
+            echo "⚠️ WARN: data branch history unavailable; using no external history for this run"
+            python daily_arxiv/check_stats.py \
+              --date "$today" \
+              --history-dir "${RUNNER_TEMP}/daily_arxiv_history/unavailable"
+        fi
         
         # 获取退出码 / Get exit code
         dedup_exit_code=$?

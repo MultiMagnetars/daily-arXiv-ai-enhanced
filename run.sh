@@ -83,9 +83,46 @@ fi
 # 在去重前保存完整原始抓取结果 / Preserve the complete crawl before deduplication
 cp "../data/${today}.jsonl" "../data/${today}_raw.jsonl"
 
+# SciX is an optional candidate source.  It never replaces the arXiv raw file
+# and a missing local token keeps the normal arXiv-only workflow available.
+SCIX_RAW="../data/${today}_scix_raw.jsonl"
+SCIX_STATUS="../data/${today}_scix_status.json"
+: > "$SCIX_RAW"
+if [ -z "${SCIX_API_TOKEN:-}" ]; then
+    echo "SciX disabled: SCIX_API_TOKEN not set"
+else
+    start_date=$(date -u -d "${today} - 3 days" "+%Y-%m-%d")
+    python daily_arxiv/scix_client.py \
+        --start-date "$start_date" \
+        --end-date "$today" \
+        --output "$SCIX_RAW" \
+        --status-file "$SCIX_STATUS"
+fi
+
+python daily_arxiv/source_merge.py \
+    --arxiv "../data/${today}_raw.jsonl" \
+    --scix "$SCIX_RAW" \
+    --output "../data/${today}.jsonl" \
+    --stats-file "../data/${today}_merge_stats.json"
+
+# Fetch a data-branch snapshot without checking it out or touching the main
+# worktree.  check_stats.py will emit an explicit warning if this is missing.
+HISTORY_WORKDIR=$(mktemp -d)
+HISTORY_DATA_DIR="$HISTORY_WORKDIR/data"
+trap 'rm -rf "$HISTORY_WORKDIR"' EXIT
+if git ls-remote --exit-code --heads origin data >/dev/null 2>&1 \
+    && git fetch --no-tags origin data \
+    && git archive --format=tar FETCH_HEAD data | tar -x -C "$HISTORY_WORKDIR"; then
+    echo "Restored data branch history outside the main worktree"
+else
+    echo "WARN: data branch history unavailable; continuing without external history"
+fi
+
 # 第二步：检查去重 / Step 2: Check duplicates  
 echo "步骤2：执行去重检查... / Step 2: Performing intelligent deduplication check..."
-python daily_arxiv/check_stats.py
+python daily_arxiv/check_stats.py \
+    --date "$today" \
+    --history-dir "$HISTORY_DATA_DIR"
 dedup_exit_code=$?
 
 case $dedup_exit_code in

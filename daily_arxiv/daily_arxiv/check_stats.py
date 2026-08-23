@@ -11,7 +11,28 @@
 import json
 import sys
 import os
-from datetime import datetime, timedelta
+import argparse
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+try:
+    from .source_merge import history_keys
+except ImportError:  # Script execution from the daily_arxiv directory.
+    from source_merge import history_keys
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DATA_DIR = REPO_ROOT / "data"
+
+
+def resolve_run_date(run_date=None):
+    value = run_date or os.environ.get("RUN_DATE")
+    if value:
+        try:
+            return date.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid run date: {value}") from exc
+    return datetime.now(timezone.utc).date()
 
 def load_papers_data(file_path):
     """
@@ -36,7 +57,7 @@ def load_papers_data(file_path):
                 if line.strip():
                     data = json.loads(line)
                     papers.append(data)
-                    ids.add(data.get('id', ''))
+                    ids.update(history_keys(data))
         return papers, ids
     except Exception as e:
         print(f"Error reading {file_path}: {e}", file=sys.stderr)
@@ -60,7 +81,7 @@ def save_papers_data(papers, file_path):
         print(f"Error saving {file_path}: {e}", file=sys.stderr)
         return False
 
-def perform_deduplication():
+def perform_deduplication(run_date=None, data_dir=None, history_dir=None):
     """
     执行多日去重：删除与历史多日重复的论文条目，保留新内容
     Perform deduplication over multiple past days
@@ -73,8 +94,10 @@ def perform_deduplication():
              - "error": 处理错误 / Processing error
     """
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_file = f"../data/{today}.jsonl"
+    today_date = resolve_run_date(run_date)
+    today = today_date.isoformat()
+    data_root = Path(data_dir) if data_dir else DEFAULT_DATA_DIR
+    today_file = data_root / f"{today}.jsonl"
     history_days = 7  # 向前追溯几天的数据进行对比
 
     if not os.path.exists(today_file):
@@ -88,27 +111,60 @@ def perform_deduplication():
         if not today_papers:
             return "no_data"
 
-        # 收集历史多日 ID 集合
+        # history_dir is normally an extracted snapshot of origin/data.  It is
+        # deliberately separate from the main worktree so checking history
+        # cannot overwrite today's newly generated working file.
+        if history_dir is None:
+            history_root = data_root
+            history_available = True
+        else:
+            history_root = Path(history_dir)
+            history_available = history_root.is_dir()
+            if not history_available:
+                print(
+                    f"WARN: data branch history directory is unavailable: {history_root}",
+                    file=sys.stderr,
+                )
+
+        # 收集历史多日 canonical keys。除了 id，还包含 arXiv、DOI、bibcode
+        # 和 title+first-author+year，确保跨源 canonical id 改变时仍能去重。
         history_ids = set()
         for i in range(1, history_days + 1):
-            date_str = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
-            history_file = f"../data/{date_str}.jsonl"
+            date_str = (today_date - timedelta(days=i)).isoformat()
+            history_file = history_root / f"{date_str}.jsonl"
             _, past_ids = load_papers_data(history_file)
             history_ids.update(past_ids)
 
-        print(f"历史{history_days}日去重库大小: {len(history_ids)} / History {history_days} days deduplication library size: {len(history_ids)}", file=sys.stderr)
+        print(
+            f"历史{history_days}日去重库大小: {len(history_ids)} / "
+            f"History {history_days} days deduplication library size: {len(history_ids)}",
+            file=sys.stderr,
+        )
 
-        duplicate_ids = today_ids & history_ids
+        duplicate_indexes = [
+            index
+            for index, paper in enumerate(today_papers)
+            if history_keys(paper).intersection(history_ids)
+        ]
 
-        if duplicate_ids:
-            print(f"发现 {len(duplicate_ids)} 篇历史重复论文 / Found {len(duplicate_ids)} historical duplicate papers", file=sys.stderr)
-            new_papers = [paper for paper in today_papers if paper.get('id', '') not in duplicate_ids]
+        if duplicate_indexes:
+            print(
+                f"发现 {len(duplicate_indexes)} 篇历史重复论文 / "
+                f"Found {len(duplicate_indexes)} historical duplicate papers",
+                file=sys.stderr,
+            )
+            duplicate_index_set = set(duplicate_indexes)
+            new_papers = [
+                paper
+                for index, paper in enumerate(today_papers)
+                if index not in duplicate_index_set
+            ]
 
             print(f"去重后剩余论文数: {len(new_papers)} / Remaining papers after deduplication: {len(new_papers)}", file=sys.stderr)
 
             if new_papers:
                 if save_papers_data(new_papers, today_file):
-                    print(f"已更新今日文件，移除 {len(duplicate_ids)} 篇重复论文 / Today's file updated, removed {len(duplicate_ids)} duplicate papers", file=sys.stderr)
+                    print(f"已更新今日文件，移除 {len(duplicate_indexes)} 篇重复论文 / Today's file updated, removed {len(duplicate_indexes)} duplicate papers", file=sys.stderr)
                     return "has_new_content"
                 else:
                     print("保存去重后的数据失败 / Failed to save deduplicated data", file=sys.stderr)
@@ -139,10 +195,27 @@ def main():
     2: 处理错误 / Processing error
     """
     
+    parser = argparse.ArgumentParser(description="Deduplicate one explicit UTC run date")
+    parser.add_argument("--date", dest="run_date", help="UTC run date: YYYY-MM-DD")
+    parser.add_argument("--data-dir", help="Working data directory")
+    parser.add_argument(
+        "--history-dir",
+        help="Extracted data-branch data directory; never use the main worktree for this snapshot",
+    )
+    args = parser.parse_args()
+
     print("正在执行去重检查... / Performing intelligent deduplication check...", file=sys.stderr)
     
     # 执行去重处理 / Perform deduplication processing
-    dedup_status = perform_deduplication()
+    try:
+        dedup_status = perform_deduplication(
+            run_date=args.run_date,
+            data_dir=args.data_dir,
+            history_dir=args.history_dir,
+        )
+    except ValueError as exc:
+        print(f"去重日期参数错误: {exc} / Invalid deduplication date", file=sys.stderr)
+        dedup_status = "error"
     
     if dedup_status == "has_new_content":
         print("✅ 去重完成，发现新内容，继续工作流 / Deduplication completed, new content found, continue workflow", file=sys.stderr)
@@ -162,4 +235,4 @@ def main():
         sys.exit(2)
 
 if __name__ == "__main__":
-    main() 
+    main()
