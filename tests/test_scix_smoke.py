@@ -244,6 +244,9 @@ class ScixSmokeTests(unittest.TestCase):
     def test_workflow_has_manual_astro_custom_guard_and_preserves_build_paths(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("scix-smoke:", workflow)
+        self.assertIn("concurrency:", workflow)
+        self.assertIn("group: ${{ github.workflow }}-${{ github.ref }}-production", workflow)
+        self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn(
             "if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' && inputs.validation_mode == 'scix-smoke' }}",
             workflow,
@@ -287,6 +290,28 @@ class ScixSmokeTests(unittest.TestCase):
         )
         self.assertNotIn("python daily_arxiv/scix_client.py", workflow)
         self.assertNotIn("python daily_arxiv/source_merge.py", workflow)
+
+    def test_production_workflow_wires_same_day_accumulation(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        build_block = workflow.split("  build:", 1)[1]
+
+        self.assertIn("id: same_day_step", build_block)
+        self.assertIn("existing_today_ai=", build_block)
+        self.assertIn("same_day_merge subtract", build_block)
+        self.assertIn("data/${today}_new.jsonl", build_block)
+        self.assertIn("python enhance.py --data ../data/${today}_new.jsonl", build_block)
+        self.assertNotIn("python enhance.py --data ../data/${today}.jsonl", build_block)
+        self.assertIn("staged_new_ai=", build_block)
+        self.assertIn("final_today_ai=", build_block)
+        self.assertIn("same_day_merge merge", build_block)
+        self.assertIn("same_day_step.outputs.has_new_candidates", build_block)
+        self.assertIn("same_day_merge_step.outcome == 'success'", build_block)
+        self.assertIn("existing same-day AI remains unchanged", build_block)
+
+        smoke_block = workflow.split("  scix-smoke:", 1)[1].split("\n  scix-e2e:", 1)[0]
+        e2e_block = workflow.split("  scix-e2e:", 1)[1].split("\n  build:", 1)[0]
+        self.assertNotIn("same_day_merge", smoke_block)
+        self.assertNotIn("same_day_merge", e2e_block)
 
     def test_status_classifier_never_exposes_client_auth_header(self):
         result = ScixFetchResult(status="ok", docs=[])
