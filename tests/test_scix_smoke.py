@@ -245,22 +245,34 @@ class ScixSmokeTests(unittest.TestCase):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("scix-smoke:", workflow)
         self.assertIn(
-            "if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' }}",
+            "if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' && inputs.validation_mode == 'scix-smoke' }}",
             workflow,
         )
         self.assertIn(
-            "if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'astro-custom' }}",
+            "if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'astro-custom' || inputs.validation_mode == 'normal' }}",
+            workflow,
+        )
+        self.assertIn(
+            "if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' && inputs.validation_mode == 'scix-e2e' }}",
             workflow,
         )
         self.assertIn('cron: "30 17 * * *"', workflow)
         self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn("validation_mode:", workflow)
+        self.assertIn("- normal", workflow)
+        self.assertIn("- scix-smoke", workflow)
+        self.assertIn("- scix-e2e", workflow)
         self.assertIn("SCIX_API_TOKEN: ${{ secrets.SCIX_API_TOKEN }}", workflow)
-        smoke_block = workflow.split("  scix-smoke:", 1)[1].split("\n  build:", 1)[0]
+        smoke_block = workflow.split("  scix-smoke:", 1)[1].split("\n  scix-e2e:", 1)[0]
         self.assertIn("python -m daily_arxiv.daily_arxiv.scix_smoke", smoke_block)
         self.assertNotIn("source_merge.py", smoke_block)
         self.assertNotIn("check_stats.py", smoke_block)
         self.assertNotIn("enhance.py", smoke_block)
         self.assertNotIn("git push", smoke_block)
+        e2e_block = workflow.split("  scix-e2e:", 1)[1].split("\n  build:", 1)[0]
+        self.assertIn("python -m daily_arxiv.daily_arxiv.scix_e2e_validate", e2e_block)
+        self.assertIn('output-dir "${RUNNER_TEMP}/scix_e2e_output"', e2e_block)
+        self.assertNotIn("git push", e2e_block)
 
     def test_status_classifier_never_exposes_client_auth_header(self):
         result = ScixFetchResult(status="ok", docs=[])

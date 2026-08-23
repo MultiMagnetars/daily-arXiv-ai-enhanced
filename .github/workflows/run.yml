@@ -7,11 +7,21 @@ on:
   schedule:
     - cron: "30 17 * * *"
   workflow_dispatch:
+    inputs:
+      validation_mode:
+        description: "Manual validation mode"
+        required: true
+        default: normal
+        type: choice
+        options:
+          - normal
+          - scix-smoke
+          - scix-e2e
 
 
 jobs:
   scix-smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' && inputs.validation_mode == 'scix-smoke' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,8 +39,49 @@ jobs:
         source .venv/bin/activate
         python -m daily_arxiv.daily_arxiv.scix_smoke
 
+  scix-e2e:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref_name == 'astro-custom' && inputs.validation_mode == 'scix-e2e' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        uv sync
+    - name: Restore read-only data branch snapshot
+      run: |
+        set -euo pipefail
+        history_root="${RUNNER_TEMP}/scix_e2e_history"
+        rm -rf "$history_root"
+        mkdir -p "$history_root"
+        if git ls-remote --exit-code --heads origin data >/dev/null 2>&1; then
+          if git fetch --no-tags origin data && git archive --format=tar FETCH_HEAD data | tar -x -C "$history_root"; then
+            echo "Read-only origin/data snapshot restored to Runner temp"
+          else
+            echo "WARN: origin/data snapshot unavailable; continuing SciX-only if needed"
+          fi
+        else
+          echo "WARN: origin/data branch unavailable; continuing SciX-only if needed"
+        fi
+    - name: Run controlled SciX to AI validation
+      env:
+        SCIX_API_TOKEN: ${{ secrets.SCIX_API_TOKEN }}
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+        LANGUAGE: ${{ vars.LANGUAGE }}
+        MODEL_NAME: ${{ vars.MODEL_NAME }}
+        FILTER_KEYWORDS: ${{ vars.FILTER_KEYWORDS }}
+      run: |
+        set -euo pipefail
+        source .venv/bin/activate
+        python -m daily_arxiv.daily_arxiv.scix_e2e_validate \
+          --history-dir "${RUNNER_TEMP}/scix_e2e_history/data" \
+          --output-dir "${RUNNER_TEMP}/scix_e2e_output"
+
   build:
-    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'astro-custom' }}
+    if: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'astro-custom' || inputs.validation_mode == 'normal' }}
 
     runs-on: ubuntu-latest
 
