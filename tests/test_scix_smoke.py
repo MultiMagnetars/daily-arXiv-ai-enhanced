@@ -308,6 +308,22 @@ class ScixSmokeTests(unittest.TestCase):
         self.assertIn("same_day_merge_step.outcome == 'success'", build_block)
         self.assertIn("existing same-day AI remains unchanged", build_block)
 
+    def test_data_branch_checkout_cleanup_removes_generated_json_files(self):
+        workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+        setup_block = workflow.split("    - name: Setup and commit to data branch", 1)[1]
+        cleanup_block = setup_block.split(
+            "        # 检查 data 分支是否存在 / Check if data branch exists", 1
+        )[0]
+
+        self.assertIn("rm -rf data/*.jsonl 2>/dev/null || true", cleanup_block)
+        self.assertIn("rm -f data/*.json 2>/dev/null || true", cleanup_block)
+        self.assertIn("rm -f data/*.md 2>/dev/null || true", cleanup_block)
+        cleanup_commands = [line.strip() for line in cleanup_block.splitlines()]
+        self.assertNotIn("git clean -fd", cleanup_commands)
+        self.assertNotIn("rm -rf data/*", cleanup_commands)
+        self.assertIn("${today}_merge_stats.json", workflow)
+        self.assertIn("${today}_scix_status.json", workflow)
+
         smoke_block = workflow.split("  scix-smoke:", 1)[1].split("\n  scix-e2e:", 1)[0]
         e2e_block = workflow.split("  scix-e2e:", 1)[1].split("\n  build:", 1)[0]
         self.assertNotIn("same_day_merge", smoke_block)
