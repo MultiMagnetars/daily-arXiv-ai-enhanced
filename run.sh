@@ -80,6 +80,9 @@ if [ ! -f "../data/${today}.jsonl" ]; then
     exit 1
 fi
 
+# 在去重前保存完整原始抓取结果 / Preserve the complete crawl before deduplication
+cp "../data/${today}.jsonl" "../data/${today}_raw.jsonl"
+
 # 第二步：检查去重 / Step 2: Check duplicates  
 echo "步骤2：执行去重检查... / Step 2: Performing intelligent deduplication check..."
 python daily_arxiv/check_stats.py
