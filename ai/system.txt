@@ -4,19 +4,25 @@ Analyze the supplied arXiv paper title and abstract for a researcher interested 
 
 The supplied title and abstract are the only paper content available. Use only the supplied title and supplied abstract. Do not use external knowledge to fill gaps and do not invent telescope or instrument names, observing frequencies or bands, dates, time spans, sample sizes, source properties, numerical values, uncertainties, statistical significance, analysis methods, causal relationships, or physical interpretations.
 
-Preserve technical abbreviations and English terms such as DM, RM, FRB, TOA, timing, single pulse, and mode switching, as well as source names, telescope and instrument names, model names, numerical values, units, frequencies, periods, and the precision used in the supplied title and abstract. Do not strengthen or weaken statements such as may, suggests, supports, or demonstrates.
-
 Reader interest is not evidence. Do not force every paper to be about pulsars, magnetars, or FRBs because the reader is interested in those topics. Mention a connection to those topics only when it is directly supported by the supplied title or abstract. A possible methodological relevance may be mentioned only cautiously and must not be presented as a result established by the paper. If the supplied title and abstract are insufficient to judge a physical interpretation or transferability to these topics, write: “根据摘要无法判断。”
 
-When the supplied title and abstract do not state a concrete item required by a field, write: “摘要未说明。” Keep each field concise and information-dense. The target output language is {language}; when the target language is Chinese, use professional natural Chinese while preserving technical English abbreviations when useful.
+For abstract_translation, translate only the supplied abstract completely and faithfully into professional Chinese. Translate every sentence in the original order. Do not summarize, shorten, omit, merge information, reinterpret, explain, add background information, add external knowledge, or invent details. The title may be used only to disambiguate terminology; do not add title information that is absent from the abstract.
 
-Field requirements:
+Preserve source names, object identifiers, telescope and instrument names, model names, numerical values, uncertainty notation, units, frequencies, periods, DM, RM, FRB, TOA, technical abbreviations, equations, LaTeX expressions, symbols, and the precision used in the abstract. Preserve mathematical notation such as $...$, \(...\), \[...\], $$...$$, \sim, \pm, subscripts, superscripts, and expressions such as 10^{{-6}} whenever possible. Translate surrounding natural-language text only and do not replace equations with invented explanations.
+
+Use conventional professional Chinese for ordinary scientific prose while preserving useful original terms, for example: 脉冲星（pulsar）, 磁星（magnetar）, 快速射电暴（FRB）, 计时（timing）, 单脉冲（single pulse）, 模式转换（mode switching）. Keep DM, RM, FRB, and TOA unchanged. Never translate or rewrite identifiers such as PSR J1637-4642, FAST, MeerKAT, Murriyang, or TMRT.
+
+Preserve evidence strength and uncertainty. Do not change may, might, suggests, indicates, supports, or demonstrates into stronger or weaker claims. Do not turn a possibility into a fact or a correlation into causation.
+
+When the supplied title and abstract do not state a concrete item required by an analysis field, write: “摘要未说明。” If the supplied abstract is missing, null, empty, or only whitespace, set abstract_translation to exactly: “摘要未提供可翻译内容。” Do not invent a translation.
+
+The five scientific analysis fields must remain independent from abstract_translation:
 - tldr: Give the central scientific conclusion in one or two sentences, including the object and the most important explicitly stated result. Do not write generic background.
 - motivation: State the research question, scientific context, and knowledge gap explicitly supported by the supplied title or abstract.
 - method: State the explicitly described observations, data, instruments, frequencies or bands, time span, sample, and analysis methods, such as timing, single-pulse, pulse-profile, polarization, RM, DM, spectral analysis, mode switching, machine learning, simulation, population, or statistical analysis. Use “摘要未说明。” for missing details.
 - result: State the main explicitly reported findings, trends, correlations, events, timing or spin-down behavior, profile, polarization, spectral, burst, or pulse results, including numbers and significance only when given in the supplied title or abstract.
 - conclusion: State the authors’ explicitly supported physical interpretation and scientific implications. Separate the stated conclusion from any cautious methodological relevance. Use “根据摘要无法判断。” when the supplied title and abstract do not support the requested interpretation.
 
-Use soft length targets: tldr in one or two sentences; motivation about 60–160 Chinese characters; method about 80–220 Chinese characters; result about 100–280 Chinese characters; conclusion about 80–220 Chinese characters. Prioritize high information density over a long review.
+Use soft length targets for the five analysis fields: tldr in one or two sentences; motivation about 60–160 Chinese characters; method about 80–220 Chinese characters; result about 100–280 Chinese characters; conclusion about 80–220 Chinese characters. The complete translation must not be shortened to meet these analysis-field targets. The five analysis fields use the requested language {language}; abstract_translation is always in professional Chinese.
 
-Return exactly the five fields required by the output schema: tldr, motivation, method, result, and conclusion. Each value must be a concise string. Do not add fields, Markdown, headings, or commentary.
+Return exactly the six fields required by the output schema: abstract_translation, tldr, motivation, method, result, and conclusion. Each value must be a concise string except that abstract_translation must be complete. Do not add fields, Markdown headings, commentary, or a second summary in place of the translation.

@@ -916,6 +916,10 @@ function parseJsonlData(jsonlText, date) {
       }
       
       const summary = paper.AI && paper.AI.tldr ? paper.AI.tldr : paper.summary;
+      const abstractTranslation =
+        paper.AI && typeof paper.AI.abstract_translation === 'string'
+          ? paper.AI.abstract_translation
+          : '';
       
       result[primaryCategory].push({
         title: paper.title,
@@ -924,6 +928,7 @@ function parseJsonlData(jsonlText, date) {
         category: allCategories,
         summary: summary,
         details: paper.summary || '',
+        abstractTranslation: abstractTranslation,
         date: date,
         id: paper.id,
         motivation: paper.AI && paper.AI.motivation ? paper.AI.motivation : '',
@@ -1022,6 +1027,15 @@ function filterByCategory(category) {
 }
 
 // 帮助函数：高亮文本中的匹配内容
+function escapeHtml(text) {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function highlightMatches(text, terms, className = 'highlight-match') {
   if (!terms || terms.length === 0 || !text) {
     return text;
@@ -1452,7 +1466,7 @@ function showPaperDetails(paper, paperIndex) {
   // 在标题前添加索引号
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${highlightedTitle}` : highlightedTitle;
   
-  const abstractText = paper.details || '';
+  const abstractText = typeof paper.details === 'string' ? paper.details : '';
   
   const categoryDisplay = paper.allCategories ? 
     paper.allCategories.join(', ') : 
@@ -1492,6 +1506,34 @@ function showPaperDetails(paper, paperIndex) {
   const highlightedConclusion = paper.conclusion && modalTitleTerms.length > 0 
     ? highlightMatches(paper.conclusion, modalTitleTerms, 'keyword-highlight') 
     : paper.conclusion;
+
+  const hasAbstractTranslation =
+    typeof paper.abstractTranslation === 'string' &&
+    paper.abstractTranslation.trim().length > 0;
+  const hasOriginalAbstract = abstractText.trim().length > 0;
+  const safeAbstractTranslation = hasAbstractTranslation
+    ? escapeHtml(paper.abstractTranslation)
+    : '';
+
+  let abstractSection = '<div class="abstract-section"><h3>Abstract</h3>';
+  if (hasAbstractTranslation) {
+    abstractSection +=
+      '<details open><summary>中文直译</summary>' +
+      '<p class="translated-abstract">' +
+      safeAbstractTranslation +
+      '</p></details>';
+  }
+  if (hasOriginalAbstract) {
+    abstractSection += hasAbstractTranslation ? '<details>' : '<details open>';
+    abstractSection +=
+      '<summary>English original</summary>' +
+      '<p class="original-abstract">' +
+      highlightedAbstract +
+      '</p></details>';
+  } else {
+    abstractSection += '<p class="original-abstract">暂无英文摘要</p>';
+  }
+  abstractSection += '</div>';
   
   // 判断是否需要显示高亮说明
   const showHighlightLegend = activeKeywords.length > 0 || activeAuthors.length > 0;
@@ -1516,7 +1558,7 @@ function showPaperDetails(paper, paperIndex) {
         ${paper.conclusion ? `<div class="paper-section"><h4>Conclusion</h4><p>${highlightedConclusion}</p></div>` : ''}
       </div>
       
-      ${highlightedAbstract ? `<h3>Abstract</h3><p class="original-abstract">${highlightedAbstract}</p>` : ''}
+      ${abstractSection}
       
       <div class="pdf-preview-section">
         <div class="pdf-header">

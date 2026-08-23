@@ -1,11 +1,20 @@
 Analyze the following arXiv paper title and abstract for a researcher in observational radio astronomy.
 
-The supplied title and abstract are the only paper content available. Follow the system instructions for title-and-abstract-only evidence, missing information, exact numbers, units, technical terms, and the five required fields.
+The supplied title and abstract are the only paper content available. Follow the system instructions for title-and-abstract-only evidence, missing information, exact numbers, units, technical terms, and the six required fields.
 
-Produce concise, information-dense content in the requested language. Do not use external knowledge, do not invent details, and do not add fields.
+Produce the two requested tasks in one structured response. Do not use external knowledge, do not invent details, and do not add fields.
 
 Title:
 {title}
 
 Abstract:
 {content}
+
+Task 1 — abstract_translation:
+Translate every sentence of the supplied abstract completely and faithfully into Chinese. Do not summarize, shorten, omit, merge information, reinterpret, explain, add background information, or add external knowledge. Preserve source names, telescope and instrument names, model names, numbers, uncertainty notation, units, frequencies, periods, DM, RM, FRB, TOA, technical abbreviations, equations, LaTeX, symbols, and evidence strength. The title may help disambiguate terminology, but do not add title information absent from the abstract.
+
+Task 2 — scientific analysis:
+Using only the supplied title and abstract, generate the independent scientific analysis fields tldr, motivation, method, result, and conclusion according to the system instructions. The analysis must not replace or shorten abstract_translation.
+
+Return exactly these six fields:
+abstract_translation, tldr, motivation, method, result, conclusion.
