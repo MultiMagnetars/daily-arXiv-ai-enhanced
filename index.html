@@ -12,6 +12,33 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
+    <!-- MathJax configuration must be defined before the MathJax script loads. -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [
+                    ['$', '$'],
+                    ['\\(', '\\)']
+                ],
+                displayMath: [
+                    ['$$', '$$'],
+                    ['\\[', '\\]']
+                ]
+            },
+            options: {
+                skipHtmlTags: [
+                    'script',
+                    'noscript',
+                    'style',
+                    'textarea',
+                    'pre',
+                    'code'
+                ]
+            }
+        };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
     <!-- Authentication Scripts -->
     <script src="js/auth-config.js"></script>
     <script src="js/auth.js"></script>

@@ -203,6 +203,21 @@ class AbstractTranslationTests(unittest.TestCase):
             set(result[0]["AI"]),
         )
 
+    def test_index_loads_mathjax_config_before_cdn(self):
+        index_html = (ROOT_DIR / "index.html").read_text(encoding="utf-8")
+        config_position = index_html.index("window.MathJax =")
+        script_position = index_html.index(
+            "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+        )
+
+        self.assertLess(config_position, script_position)
+        self.assertIn("['$', '$']", index_html)
+        self.assertIn("['\\\\(', '\\\\)']", index_html)
+        self.assertIn("['$$', '$$']", index_html)
+        self.assertIn("['\\\\[', '\\\\]']", index_html)
+        self.assertIn("'script'", index_html)
+        self.assertIn("'pre'", index_html)
+
     def test_frontend_new_old_data_xss_and_latex(self):
         node_script = r"""
 const fs = require('fs');
@@ -246,13 +261,13 @@ vm.runInContext(source, context);
 
 const newRecord = {
   id: 'test',
-  title: 'A radio pulsar',
+  title: 'J1637$-$4642 radio pulsar',
   authors: ['A. Author'],
   categories: ['astro-ph.HE'],
   summary: 'We report observations of $10^{-6}$.',
   abs: 'https://arxiv.org/abs/1234.5678',
   AI: {
-    abstract_translation: "<script>alert(1)</script><img src=x onerror=alert(1)> & < > \" ' $10^{-6}$ \\\\sim \\\\pm PSR J1637-4642",
+    abstract_translation: "<script>alert(1)</script><img src=x onerror=alert(1)> & < > \" ' $10^{-6}$ $\\Delta\\nu/\\nu$ $\\dot{\\nu}$ $\\sim 100$ $\\pm 0.1$ $\\approx 0.0187$ J1637$-$4642 $B(t)/B_0$ $$E = mc^2$$ \\(\\nu = 1/P\\) \\[\\dot{P} > 0\\] 归一化频率变化为 $\\Delta\\nu/\\nu \\sim 2.7\\times10^{-6}$。",
     tldr: '核心结论',
     motivation: '动机',
     method: '方法',
@@ -267,10 +282,27 @@ if (!paper.abstractTranslation) throw new Error('translation was not parsed');
 
 context.showPaperDetails(paper, 1);
 let html = element('modalBody').innerHTML;
+if (!element('modalTitle').innerHTML.includes('J1637$-$4642')) throw new Error('title LaTeX was not preserved');
 if (!html.includes('<details open><summary>中文直译')) throw new Error('Chinese translation is not expanded');
 if (!html.includes('<summary>English original</summary>')) throw new Error('English original is missing');
 if (html.includes('<script>alert(1)</script>') || html.includes('<img src=x')) throw new Error('translation HTML was not escaped');
-if (!html.includes('&lt;script&gt;') || !html.includes('\\\\sim')) throw new Error('escaped translation or LaTeX is missing');
+if (!html.includes('&lt;script&gt;')) throw new Error('escaped translation is missing');
+for (const sample of [
+  '$10^{-6}$',
+  '$\\Delta\\nu/\\nu$',
+  '$\\dot{\\nu}$',
+  '$\\sim 100$',
+  '$\\pm 0.1$',
+  '$\\approx 0.0187$',
+  'J1637$-$4642',
+  '$B(t)/B_0$',
+  '$$E = mc^2$$',
+  '\\(\\nu = 1/P\\)',
+  '\\[\\dot{P} &gt; 0\\]',
+  '归一化频率变化为 $\\Delta\\nu/\\nu \\sim 2.7\\times10^{-6}$。'
+]) {
+  if (!html.includes(sample)) throw new Error(`LaTeX sample is missing: ${sample}`);
+}
 
 const oldRecord = {
   id: 'old',
@@ -316,7 +348,46 @@ for (const value of invalidValues) {
     throw new Error('invalid translation value was not safely ignored');
   }
 }
-console.log('frontend checks PASS');
+
+const modalBody = element('modalBody');
+const typesetTargets = [];
+const clearTargets = [];
+context.window.MathJax = {
+  typesetClear: function(containers) { clearTargets.push(containers[0]); },
+  typesetPromise: function(containers) {
+    typesetTargets.push(containers[0]);
+    return Promise.resolve();
+  }
+};
+context.showPaperDetails(oldPaper, 1);
+context.showPaperDetails(paper, 1);
+if (typesetTargets.length !== 2 || typesetTargets.some(target => target !== modalBody)) {
+  throw new Error('MathJax was not scoped to modalBody for each modal render');
+}
+if (clearTargets.length !== 2 || clearTargets.some(target => target !== modalBody)) {
+  throw new Error('MathJax typesetClear was not scoped to modalBody');
+}
+
+let warningCount = 0;
+const originalWarn = context.console.warn;
+context.console.warn = function(message) {
+  if (String(message).includes('MathJax typesetting failed')) warningCount += 1;
+};
+context.window.MathJax = {
+  typesetClear: function() {},
+  typesetPromise: function() {
+    return Promise.reject(new Error('typeset failed'));
+  }
+};
+context.showPaperDetails(oldPaper, 1);
+
+setTimeout(() => {
+  if (warningCount !== 1) throw new Error('MathJax rejection was not handled with one warning');
+  context.console.warn = originalWarn;
+  context.window.MathJax = undefined;
+  context.showPaperDetails(paper, 1);
+  console.log('frontend checks PASS');
+}, 0);
 """
         completed = subprocess.run(
             ["node", "-e", node_script],

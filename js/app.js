@@ -1036,6 +1036,48 @@ function escapeHtml(text) {
     .replace(/'/g, '&#39;');
 }
 
+function clearMath(container) {
+  if (
+    window.MathJax &&
+    typeof window.MathJax.typesetClear === 'function' &&
+    container
+  ) {
+    try {
+      window.MathJax.typesetClear([container]);
+    } catch (error) {
+      console.warn('MathJax clearing failed:', error);
+    }
+  }
+}
+
+async function typesetMath(container) {
+  if (
+    window.MathJax &&
+    typeof window.MathJax.typesetPromise === 'function' &&
+    container
+  ) {
+    try {
+      await window.MathJax.typesetPromise([container]);
+    } catch (error) {
+      console.warn('MathJax typesetting failed:', error);
+    }
+  }
+}
+
+function escapeModalText(value) {
+  return escapeHtml(value == null ? '' : value);
+}
+
+function highlightModalText(value, terms, className) {
+  const safeValue = escapeModalText(value);
+  if (!terms || terms.length === 0 || !value) {
+    return safeValue;
+  }
+
+  const safeTerms = terms.map(term => escapeModalText(term));
+  return highlightMatches(safeValue, safeTerms, className);
+}
+
 function highlightMatches(text, terms, className = 'highlight-match') {
   if (!terms || terms.length === 0 || !text) {
     return text;
@@ -1459,60 +1501,76 @@ function showPaperDetails(paper, paperIndex) {
   if (activeKeywords.length > 0) modalTitleTerms.push(...activeKeywords);
   if (textSearchQuery && textSearchQuery.trim().length > 0) modalTitleTerms.push(textSearchQuery.trim());
   // 高亮标题
-  const highlightedTitle = modalTitleTerms.length > 0 
-    ? highlightMatches(paper.title, modalTitleTerms, 'keyword-highlight') 
-    : paper.title;
+  const highlightedTitle = highlightModalText(
+    paper.title,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
   
   // 在标题前添加索引号
   modalTitle.innerHTML = paperIndex ? `<span class="paper-index-badge">${paperIndex}</span> ${highlightedTitle}` : highlightedTitle;
   
   const abstractText = typeof paper.details === 'string' ? paper.details : '';
   
-  const categoryDisplay = paper.allCategories ? 
-    paper.allCategories.join(', ') : 
-    paper.category;
+  const categoryDisplay = escapeModalText(paper.allCategories ?
+    paper.allCategories.join(', ') :
+    paper.category);
   
   // 高亮作者（作者过滤 + 文本搜索）
   const modalAuthorTerms = [];
   if (activeAuthors.length > 0) modalAuthorTerms.push(...activeAuthors);
   if (textSearchQuery && textSearchQuery.trim().length > 0) modalAuthorTerms.push(textSearchQuery.trim());
-  const highlightedAuthors = modalAuthorTerms.length > 0 
-    ? highlightMatches(paper.authors, modalAuthorTerms, 'author-highlight') 
-    : paper.authors;
+  const highlightedAuthors = highlightModalText(
+    paper.authors,
+    modalAuthorTerms,
+    'author-highlight'
+  );
   
   // 高亮摘要（关键词 + 文本搜索）
-  const highlightedSummary = modalTitleTerms.length > 0 
-    ? highlightMatches(paper.summary, modalTitleTerms, 'keyword-highlight') 
-    : paper.summary;
+  const highlightedSummary = highlightModalText(
+    paper.summary,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
   
   // 高亮详情（Abstract/details）
-  const highlightedAbstract = modalTitleTerms.length > 0 
-    ? highlightMatches(abstractText, modalTitleTerms, 'keyword-highlight') 
-    : abstractText;
+  const highlightedAbstract = highlightModalText(
+    abstractText,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
   
   // 高亮其他部分（如果存在且是摘要的一部分）
-  const highlightedMotivation = paper.motivation && modalTitleTerms.length > 0 
-    ? highlightMatches(paper.motivation, modalTitleTerms, 'keyword-highlight') 
-    : paper.motivation;
-  
-  const highlightedMethod = paper.method && modalTitleTerms.length > 0 
-    ? highlightMatches(paper.method, modalTitleTerms, 'keyword-highlight') 
-    : paper.method;
-  
-  const highlightedResult = paper.result && modalTitleTerms.length > 0 
-    ? highlightMatches(paper.result, modalTitleTerms, 'keyword-highlight') 
-    : paper.result;
-  
-  const highlightedConclusion = paper.conclusion && modalTitleTerms.length > 0 
-    ? highlightMatches(paper.conclusion, modalTitleTerms, 'keyword-highlight') 
-    : paper.conclusion;
+  const highlightedMotivation = highlightModalText(
+    paper.motivation,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
+
+  const highlightedMethod = highlightModalText(
+    paper.method,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
+
+  const highlightedResult = highlightModalText(
+    paper.result,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
+
+  const highlightedConclusion = highlightModalText(
+    paper.conclusion,
+    modalTitleTerms,
+    'keyword-highlight'
+  );
 
   const hasAbstractTranslation =
     typeof paper.abstractTranslation === 'string' &&
     paper.abstractTranslation.trim().length > 0;
   const hasOriginalAbstract = abstractText.trim().length > 0;
   const safeAbstractTranslation = hasAbstractTranslation
-    ? escapeHtml(paper.abstractTranslation)
+    ? escapeModalText(paper.abstractTranslation)
     : '';
 
   let abstractSection = '<div class="abstract-section"><h3>Abstract</h3>';
@@ -1579,8 +1637,10 @@ function showPaperDetails(paper, paperIndex) {
     </div>
   `;
   
-  // Update modal content
-  document.getElementById('modalBody').innerHTML = modalContent;
+  // Update modal content and typeset only the current modal body.
+  clearMath(modalBody);
+  modalBody.innerHTML = modalContent;
+  void typesetMath(modalBody);
   document.getElementById('paperLink').href = paper.url;
   document.getElementById('pdfLink').href = paper.url.replace('abs', 'pdf');
   document.getElementById('htmlLink').href = paper.url.replace('abs', 'html');
